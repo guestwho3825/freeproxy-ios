@@ -1,5 +1,5 @@
-freeproxy
-freeproxy-*
+/freeproxy
+/freeproxy-*
 *.ipa
 ios/Mobile.xcframework
 ios/build

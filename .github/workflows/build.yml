@@ -36,6 +36,7 @@ jobs:
       - name: Build app
         run: |
           brew install xcodegen
+          set -o pipefail
           cd ios && xcodegen generate
           xcodebuild -project FreeProxy.xcodeproj -scheme FreeProxy -configuration Release -sdk iphoneos \
             -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | tail -40
