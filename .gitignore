@@ -1,0 +1,8 @@
+freeproxy
+freeproxy-*
+*.ipa
+ios/Mobile.xcframework
+ios/build
+ios/*.xcodeproj
+token.json
+config.json

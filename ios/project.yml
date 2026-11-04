@@ -1,0 +1,32 @@
+name: FreeProxy
+options:
+  bundleIdPrefix: com.hihellohejo
+  deploymentTarget:
+    iOS: "15.0"
+targets:
+  FreeProxy:
+    type: application
+    platform: iOS
+    sources: [App]
+    dependencies:
+      - framework: Mobile.xcframework
+        embed: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.hihellohejo.freeproxy
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "5.0"
+        OTHER_LDFLAGS: ["-lresolv"]
+        ENABLE_BITCODE: NO
+        CODE_SIGNING_ALLOWED: NO
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: FreeProxy
+        UILaunchScreen: {}
+        UIBackgroundModes: [audio]
+        NSLocalNetworkUsageDescription: FreeProxy connects Minecraft on this iPhone to Realms and servers.
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        LSRequiresIPhoneOS: true

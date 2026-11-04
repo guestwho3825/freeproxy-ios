@@ -1,0 +1,55 @@
+name: Build
+on:
+  push:
+  workflow_dispatch:
+env:
+  GOFLAGS: -mod=mod
+permissions:
+  contents: write
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.25' }
+      - run: |
+          sed -i '/^replace /d' go.mod && go mod download
+          CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -trimpath -ldflags="-s -w -checklinkname=0" -o freeproxy ./cmd/freeproxy
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w -checklinkname=0" -o freeproxy-backup ./cmd/freeproxy
+      - uses: actions/upload-artifact@v4
+        with: { name: android, path: "freeproxy*" }
+  ios:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.25' }
+      - name: Build Go core (gomobile)
+        run: |
+          sed -i '' '/^replace /d' go.mod
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          go get golang.org/x/mobile/bind@latest
+          gomobile init
+          gomobile bind -target ios -iosversion 15.0 -ldflags="-s -w -checklinkname=0" -o ios/Mobile.xcframework ./mobile
+      - name: Build app
+        run: |
+          brew install xcodegen
+          cd ios && xcodegen generate
+          xcodebuild -project FreeProxy.xcodeproj -scheme FreeProxy -configuration Release -sdk iphoneos \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | tail -40
+          mkdir -p Payload && cp -R build/Build/Products/Release-iphoneos/FreeProxy.app Payload/
+          zip -qry ../FreeProxy.ipa Payload
+      - name: Source zip
+        run: git archive --format=zip -o FreeProxy-source.zip HEAD
+      - uses: actions/upload-artifact@v4
+        with: { name: ios, path: "FreeProxy*" }
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: FreeProxy build ${{ github.run_number }}
+          files: |
+            FreeProxy.ipa
+            FreeProxy-source.zip
