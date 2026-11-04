@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/df-mc/go-nethernet"
 	"github.com/df-mc/go-playfab/v2"
 	"github.com/df-mc/go-xsapi/v2"
 	"github.com/sandertv/gophertunnel/minecraft"
@@ -28,7 +29,7 @@ import (
 	"golang.org/x/oauth2"
 )
 
-const version = "1.2"
+const version = "1.3"
 
 type config struct {
 	Mode       string `json:"mode"` // "realm" or "server"
@@ -109,20 +110,41 @@ func runMain(args []string, listenHost string, defaultPort int) {
 		cfg = loadConfig(src)
 	}
 
-	listener, err := minecraft.ListenConfig{
-		StatusProvider:         minecraft.NewStatusProvider("FreeProxy", "FreeProxy"),
+	lc := minecraft.ListenConfig{
+		StatusProvider: minecraft.NewStatusProvider("FreeProxy", "FreeProxy"),
 		// Real Xbox sign-in is required so nobody can fake your gamertag to get past the lock.
 		AuthenticationDisabled: test,
 		ErrorLog:               logger,
-	}.Listen("raknet", fmt.Sprintf("%s:%d", listenHost, cfg.ListenPort))
+	}
+	bind := "0.0.0.0" // NetherNet game data travels over Wi-Fi, even for 127.0.0.1 joins
+	// Minecraft 26.60+ joins servers with NetherNet (TCP signaling + WebRTC).
+	listener, err := lc.ListenNetwork(minecraft.NetherNet{ListenConfig: nethernet.ListenConfig{AllowAnonymous: test}}, fmt.Sprintf("%s:%d", bind, cfg.ListenPort))
 	if err != nil {
-		fatal("could not open port %d: %v", cfg.ListenPort, err)
+		fatal("could not open port %d (NetherNet/TCP): %v", cfg.ListenPort, err)
 	}
 	defer listener.Close()
+	// Older Minecraft versions still use RakNet (UDP) on the same port number.
+	if rl, err := lc.Listen("raknet", fmt.Sprintf("%s:%d", bind, cfg.ListenPort)); err == nil {
+		defer rl.Close()
+		go func() {
+			for {
+				c, err := rl.Accept()
+				if err != nil {
+					return
+				}
+				go handleConn(c.(*minecraft.Conn), rl, cfg, src)
+			}
+		}()
+	} else {
+		fmt.Fprintln(out, "  (old RakNet mode unavailable:", err, ")")
+	}
 
 	fmt.Fprintln(out, "Proxy is running!")
 	if listenHost == "127.0.0.1" {
 		fmt.Fprintf(out, "  Now open Minecraft > Play > Servers > Add Server\n    Address: 127.0.0.1   Port: %d\n", cfg.ListenPort)
+		for _, ip := range localIPs() {
+			fmt.Fprintf(out, "    (or this iPhone's Wi-Fi IP: %s)\n", ip)
+		}
 		fmt.Fprintln(out, "  Keep this app open in the background (don't swipe it away).")
 	} else {
 		for _, ip := range localIPs() {
@@ -289,7 +311,15 @@ func loadConfig(src oauth2.TokenSource) config {
 func dialTarget(ctx context.Context, cfg config, src oauth2.TokenSource, conn *minecraft.Conn) (*minecraft.Conn, func(), error) {
 	cd := conn.ClientData()
 	if cfg.Mode == "server" {
-		c, err := minecraft.Dialer{TokenSource: src, ClientData: cd, ErrorLog: logger}.DialContext(ctx, "raknet", cfg.Address)
+		// New servers use NetherNet; fall back to RakNet for older ones.
+		nctx, cancel := context.WithTimeout(ctx, 12*time.Second)
+		c, err := minecraft.Dialer{TokenSource: src, ClientData: cd, ErrorLog: logger}.DialContextNetwork(nctx, minecraft.NetherNet{}, "http://"+cfg.Address)
+		cancel()
+		if err == nil {
+			return c, func() {}, nil
+		}
+		fmt.Fprintln(out, "[server] NetherNet failed, trying RakNet:", err)
+		c, err = minecraft.Dialer{TokenSource: src, ClientData: cd, ErrorLog: logger}.DialContext(ctx, "raknet", cfg.Address)
 		return c, func() {}, err
 	}
 
