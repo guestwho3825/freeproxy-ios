@@ -1,15 +1,43 @@
 import SwiftUI
 import AVFoundation
+import CoreLocation
 import Mobile
 
 // FreeProxy for iOS (sideload). Made for hihellohejo.
 
-final class KeepAlive {
+final class KeepAlive: NSObject, CLLocationManagerDelegate {
     static let shared = KeepAlive()
     private var player: AVAudioPlayer?
+    private let location = CLLocationManager()
+
+    // Background location keeps the app alive even when Minecraft's audio
+    // interrupts our silent audio. Lowest accuracy; nothing is stored or sent.
+    func startLocation() {
+        location.delegate = self
+        location.desiredAccuracy = kCLLocationAccuracyThreeKilometers
+        location.distanceFilter = CLLocationDistanceMax
+        location.pausesLocationUpdatesAutomatically = false
+        location.requestWhenInUseAuthorization()
+        if location.authorizationStatus == .authorizedWhenInUse || location.authorizationStatus == .authorizedAlways {
+            location.allowsBackgroundLocationUpdates = true
+            location.showsBackgroundLocationIndicator = true
+            location.startUpdatingLocation()
+        }
+    }
+
+    func locationManagerDidChangeAuthorization(_ m: CLLocationManager) {
+        if m.authorizationStatus == .authorizedWhenInUse || m.authorizationStatus == .authorizedAlways {
+            m.allowsBackgroundLocationUpdates = true
+            m.showsBackgroundLocationIndicator = true
+            m.startUpdatingLocation()
+        }
+    }
+    func locationManager(_ m: CLLocationManager, didUpdateLocations l: [CLLocation]) {}
+    func locationManager(_ m: CLLocationManager, didFailWithError e: Error) {}
 
     // Plays silent audio so iOS keeps the proxy running while you're in Minecraft.
     func start() {
+        startLocation()
         let s = AVAudioSession.sharedInstance()
         try? s.setCategory(.playback, mode: .default, options: [.mixWithOthers])
         try? s.setActive(true)

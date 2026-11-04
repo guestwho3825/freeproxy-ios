@@ -28,7 +28,7 @@ import (
 	"golang.org/x/oauth2"
 )
 
-const version = "1.1"
+const version = "1.2"
 
 type config struct {
 	Mode       string `json:"mode"` // "realm" or "server"
@@ -142,6 +142,14 @@ func runMain(args []string, listenHost string, defaultPort int) {
 		fmt.Fprintln(out, "  Not locked yet: the FIRST account that joins becomes the owner.")
 	}
 	fmt.Fprint(out, "  Type .help in Minecraft chat once you're in.\n\n")
+	if listenHost == "127.0.0.1" {
+		// Heartbeat: if these stop while you're in Minecraft, iOS froze the app.
+		go func() {
+			for t := range time.Tick(30 * time.Second) {
+				fmt.Fprintf(out, "[alive] %s\n", t.Format("15:04:05"))
+			}
+		}()
+	}
 
 	for {
 		c, err := listener.Accept()
@@ -524,6 +532,7 @@ func fatal(f string, a ...any) {
 // It blocks until the proxy stops and returns the reason.
 func Run(dir string, in io.Reader, w io.Writer, args []string, listenHost string, defaultPort int) (err error) {
 	stdin, out = bufio.NewReader(in), w
+	logger = slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	if dir != "" {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return err

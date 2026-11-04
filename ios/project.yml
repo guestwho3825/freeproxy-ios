@@ -14,7 +14,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.hihellohejo.freeproxy
-        MARKETING_VERSION: "1.1"
+        MARKETING_VERSION: "1.2"
         CURRENT_PROJECT_VERSION: "1"
         TARGETED_DEVICE_FAMILY: "1,2"
         SWIFT_VERSION: "5.0"
@@ -26,7 +26,9 @@ targets:
       properties:
         CFBundleDisplayName: FreeProxy
         UILaunchScreen: {}
-        UIBackgroundModes: [audio]
+        UIBackgroundModes: [audio, location]
+        NSLocationWhenInUseUsageDescription: FreeProxy uses background location only to stay running while you play Minecraft. Your location is never saved or sent anywhere.
+        NSLocationAlwaysAndWhenInUseUsageDescription: FreeProxy uses background location only to stay running while you play Minecraft. Your location is never saved or sent anywhere.
         NSLocalNetworkUsageDescription: FreeProxy connects Minecraft on this iPhone to Realms and servers.
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         LSRequiresIPhoneOS: true
