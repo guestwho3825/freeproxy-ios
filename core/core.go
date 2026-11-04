@@ -28,7 +28,7 @@ import (
 	"golang.org/x/oauth2"
 )
 
-const version = "1.0"
+const version = "1.1"
 
 type config struct {
 	Mode       string `json:"mode"` // "realm" or "server"
@@ -36,6 +36,24 @@ type config struct {
 	RealmName  string `json:"realm_name,omitempty"`
 	Address    string `json:"address,omitempty"`
 	ListenPort int    `json:"listen_port"`
+	// Only these Xbox accounts may use the proxy. The first person to join claims it.
+	AllowedXUIDs []string `json:"allowed_xuids,omitempty"`
+	AllowedNames []string `json:"allowed_names,omitempty"`
+}
+
+var cfgMu sync.Mutex
+
+func saveConfig(cfg config) {
+	b, _ := json.MarshalIndent(cfg, "", "  ")
+	_ = os.WriteFile("config.json", b, 0644)
+}
+
+func readConfigFile() config {
+	var c config
+	if b, err := os.ReadFile("config.json"); err == nil {
+		_ = json.Unmarshal(b, &c)
+	}
+	return c
 }
 
 var (
@@ -56,6 +74,24 @@ func runMain(args []string, listenHost string, defaultPort int) {
 		fmt.Fprintln(out, "Target cleared. Run again to pick a new Realm/server.")
 		return
 	}
+	if len(args) > 1 && args[0] == "port" {
+		n, err := strconv.Atoi(args[1])
+		if err != nil || n < 1 || n > 65535 {
+			fatal("port must be a number like 19132")
+		}
+		c := readConfigFile()
+		c.ListenPort = n
+		saveConfig(c)
+		fmt.Fprintf(out, "Port set to %d. Run again to start.\n", n)
+		return
+	}
+	if len(args) > 0 && args[0] == "unlock" {
+		c := readConfigFile()
+		c.AllowedXUIDs, c.AllowedNames = nil, nil
+		saveConfig(c)
+		fmt.Fprintln(out, "Lock cleared. The next person to join will own this proxy.")
+		return
+	}
 	if len(args) > 0 && args[0] == "logout" {
 		_ = os.Remove("token.json")
 		_ = os.Remove("config.json")
@@ -65,8 +101,9 @@ func runMain(args []string, listenHost string, defaultPort int) {
 
 	var src oauth2.TokenSource
 	var cfg config
-	if t := os.Getenv("FREEPROXY_TEST_TARGET"); t != "" { // developer self-test, no login
-		cfg = config{Mode: "server", Address: t, ListenPort: 19140}
+	test := os.Getenv("FREEPROXY_TEST_TARGET") != ""
+	if test { // developer self-test, no login
+		cfg = config{Mode: "server", Address: os.Getenv("FREEPROXY_TEST_TARGET"), ListenPort: 19140}
 	} else {
 		src = loadTokenSource()
 		cfg = loadConfig(src)
@@ -74,7 +111,8 @@ func runMain(args []string, listenHost string, defaultPort int) {
 
 	listener, err := minecraft.ListenConfig{
 		StatusProvider:         minecraft.NewStatusProvider("FreeProxy", "FreeProxy"),
-		AuthenticationDisabled: true,
+		// Real Xbox sign-in is required so nobody can fake your gamertag to get past the lock.
+		AuthenticationDisabled: test,
 		ErrorLog:               logger,
 	}.Listen("raknet", fmt.Sprintf("%s:%d", listenHost, cfg.ListenPort))
 	if err != nil {
@@ -91,6 +129,17 @@ func runMain(args []string, listenHost string, defaultPort int) {
 			fmt.Fprintf(out, "  On your iPhone: Minecraft > Play > Servers > Add Server\n    Address: %s   Port: %d\n", ip, cfg.ListenPort)
 		}
 		fmt.Fprintln(out, "  (It may also show up under the Friends tab as a LAN game.)")
+		for _, ip := range localIPs() {
+			if strings.HasPrefix(ip, "100.115.92.") {
+				fmt.Fprintln(out, "\n  CHROMEBOOK: that address only works inside this Chromebook.")
+				fmt.Fprintln(out, "  Use your playit.gg tunnel address on your iPhone instead (see README).")
+			}
+		}
+	}
+	if len(cfg.AllowedNames) > 0 {
+		fmt.Fprintf(out, "  Locked to: %s  (run with `unlock` to reset)\n", strings.Join(cfg.AllowedNames, ", "))
+	} else if !test {
+		fmt.Fprintln(out, "  Not locked yet: the FIRST account that joins becomes the owner.")
 	}
 	fmt.Fprint(out, "  Type .help in Minecraft chat once you're in.\n\n")
 
@@ -174,7 +223,9 @@ func loadConfig(src oauth2.TokenSource) config {
 		}
 		return cfg
 	}
-	cfg.ListenPort = defPort
+	if cfg.ListenPort == 0 { // keep a port set with the `port` command
+		cfg.ListenPort = defPort
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
@@ -313,6 +364,28 @@ func dialTarget(ctx context.Context, cfg config, src oauth2.TokenSource, conn *m
 
 func handleConn(conn *minecraft.Conn, listener *minecraft.Listener, cfg config, src oauth2.TokenSource) {
 	name := conn.IdentityData().DisplayName
+	xuid := conn.IdentityData().XUID
+	if os.Getenv("FREEPROXY_TEST_TARGET") == "" {
+		cfgMu.Lock()
+		c := readConfigFile()
+		if len(c.AllowedXUIDs) == 0 && xuid != "" {
+			c.AllowedXUIDs, c.AllowedNames = []string{xuid}, []string{name}
+			saveConfig(c)
+			fmt.Fprintf(out, "[lock] %s is now the owner. Only this account can use FreeProxy.\n", name)
+		}
+		allowed := false
+		for _, x := range c.AllowedXUIDs {
+			if x == xuid && xuid != "" {
+				allowed = true
+			}
+		}
+		cfgMu.Unlock()
+		if !allowed {
+			fmt.Fprintf(out, "[lock] blocked %s (not the owner)\n", name)
+			_ = listener.Disconnect(conn, "This FreeProxy is private.")
+			return
+		}
+	}
 	fmt.Fprintf(out, "[+] %s connected, joining target...\n", name)
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	server, cleanup, err := dialTarget(ctx, cfg, src, conn)

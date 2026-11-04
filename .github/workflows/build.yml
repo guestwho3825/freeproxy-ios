@@ -7,7 +7,7 @@ env:
 permissions:
   contents: write
 jobs:
-  android:
+  desktop:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,11 +15,15 @@ jobs:
         with: { go-version: '1.25' }
       - run: |
           sed -i '/^replace /d' go.mod && go mod download
-          CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -trimpath -ldflags="-s -w -checklinkname=0" -o freeproxy ./cmd/freeproxy
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w -checklinkname=0" -o freeproxy-backup ./cmd/freeproxy
+          L='-s -w -checklinkname=0'
+          CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -trimpath -ldflags="$L" -o out/freeproxy-android ./cmd/freeproxy
+          CGO_ENABLED=0 GOOS=linux   GOARCH=arm64 go build -trimpath -ldflags="$L" -o out/freeproxy-linux-arm64 ./cmd/freeproxy
+          CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build -trimpath -ldflags="$L" -o out/freeproxy-linux-amd64 ./cmd/freeproxy
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="$L" -o out/freeproxy-windows.exe ./cmd/freeproxy
       - uses: actions/upload-artifact@v4
-        with: { name: android, path: "freeproxy*" }
+        with: { name: desktop, path: out/ }
   ios:
+    needs: desktop
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -46,6 +50,8 @@ jobs:
         run: git archive --format=zip -o FreeProxy-source.zip HEAD
       - uses: actions/upload-artifact@v4
         with: { name: ios, path: "FreeProxy*" }
+      - uses: actions/download-artifact@v4
+        with: { name: desktop, path: out }
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
@@ -54,3 +60,4 @@ jobs:
           files: |
             FreeProxy.ipa
             FreeProxy-source.zip
+            out/*
